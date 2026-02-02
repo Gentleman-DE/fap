@@ -1,0 +1,52 @@
+FAP-Historie:
+0.8.8:
+-	Möglichkeit, bekannte Netze an den FAP zu übergeben, so dass kein neues WLAN auf dem Gerät eingerichtet werden muss (set). Hierfür muss aber das Kennwort des Netzwerks bekannt sein
+
+0.8.7:
+-	Installer auf 0.4 aktualisiert, php8.2 statt php7.4 eingetragen
+-	python3-termcolor wird über Repo und nicht über pip installiert
+-	User fap statt User pi wird genutzt, User wird angelegt, das Kennwort ist 1234
+- 	Kontaktdaten auf FH Dortmund aktualisiert
+-	Module in Unterverzeichnis libs ausgelagert
+-	IPv6 Kommunikationsvorbereitung (-6)
+-	UUID für FAP Installation hinterlegt
+
+0.8.6:
+-	Entfernen von -c
+-	Verbesserte Ausgabe der Version -v, Hinzufügen von WLAN-Informationen
+-	hostapd-Aufruf für Fehlerbehebung erweitert (/etc/default/hostapd: -d -t -f /tmp/hostapd.log)
+-	Installer auf 0.3 aktualisiert, php7.4 statt php7.3 eingetragen
+-	Installer geht standardmäßig von Non-Expert (EXPERT = 0) aus, und benötigt somit per Default keine zweite NIC mehr
+- 	Informationen zum Cleaner-Skript hinzugefügt
+-	manageIP() nach addIPtoFirewall() umbenannt
+-	Rudimentäre IPv6 Behandlung eingeführt (Schalter -6, oder --ipv6)
+
+
+0.8.5:
+-	Fehlerbehebung bei pcap-Erstellung
+-	Verbesserte Output-Verarbeitung hinsichtlich -o
+-	Codeoptimierung und Linting
+-	Verbesserte Modularisierung
+-	Hinzufügen des Schalters --multiple: Hiermit können IP-Adressen und FQDN hinzugefügt werden, FAP kümmert sich eigenständig um die korrekte Zuordnung
+-	Optimierung WL-Reset über CLI
+- 	Templatedateien können IP-Adressen beinhalten. Syntax für die Angabe einer IP ist:
+	**IP-Adresse, also z.B. **180.83.1.22
+	Die IP-Adressen können auch ganze Netze bezeichnen, z.B. 192.168.10.1/24
+-	Protokollierung der Firewalleinträge verbessert, nach Beendigung der Aufzeichnung werden die freigegebenen IP-Adressen in eine Textdatei mit dem Namen iplist_AKTUELLER_TIMESTAMP.txt kopiert.
+
+
+0.8.4:
+-	Fehler bei Templateauswahl über CLI behoben
+
+0.8.3:
+-	Fehler beim Servicemapping behoben
+
+0.8.2:
+-	Ausgabe der OVS-Mirror-Daten auf USB-Stick
+- 	Aktualisierte Installation, Installer Update auf 0.2
+-	Warnung auf Webinterface
+- 	Kleinere Fehlerbehebung
+
+
+0.8.1:
+-	Fehlerbehebung wlan0

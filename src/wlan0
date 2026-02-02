@@ -1,0 +1,5 @@
+auto wlan0
+iface wlan0 inet static
+address 10.98.76.5
+netmask 255.255.255.0
+

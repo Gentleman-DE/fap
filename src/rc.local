@@ -1,0 +1,44 @@
+#!/bin/sh -e
+#
+# rc.local
+#
+# This script is executed at the end of each multiuser runlevel.
+# Make sure that the script will "exit 0" on success or any other
+# value on error.
+#
+# In order to enable or disable this script just change the execution
+# bits.
+#
+# By default this script does nothing.
+
+# Print the IP address
+_IP=$(hostname -I) || true
+if [ "$_IP" ]; then
+  printf "My IP address is %s\n" "$_IP"
+fi
+
+# ipset aktivieren
+ipset destroy
+ipset create WL hash:ip
+ipset create admin hash:ip
+
+# iptables restore
+iptables-restore < /home/fap/src/forward.txt
+
+#hostapd
+/home/fap/src/hostapd_start.sh
+
+# br0 aktivieren
+#ovs-vsctl --if-exists del-br br0
+#dhclient eth0
+/home/fap/src/ovs.sh
+printf "IP: $_IP"
+
+# br0 IP in iptables
+IP=$(ip -4 addr show br0|grep -oP "(?<=inet ).*(?=/)")
+echo $IP
+ipset add admin $IP
+
+# Starte Ueberwachung der Zieldatei
+/home/fap/fifo.sh &
+exit 0
