@@ -207,13 +207,16 @@ chmod a+x /home/fap/src/*.sh
 chmod a+x /etc/rc.local
 
 # git update
-echo "*** git clone"
+# echo "*** git clone"
+# mkdir /home/fap/template/
+# cd /var/www/html
+# git clone https://github.com/dfeu/fap
+# cd -
+# cp /var/www/html/fap/template/* /home/fap/template/
+# cp ./src/whitelist_user.conf /var/www/html/fap/
+
 mkdir /home/fap/template/
-cd /var/www/html
-git clone https://github.com/dfeu/fap
-cd -
-cp /var/www/html/fap/template/* /home/fap/template/
-cp ./src/whitelist_user.conf /var/www/html/fap/
+cp ./template/* /home/fap/template
 
 # Rechte anpassen
 echo "*** Rechte in /home/fap anpassen"
