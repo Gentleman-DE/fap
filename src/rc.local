@@ -11,6 +11,13 @@
 #
 # By default this script does nothing.
 
+# Bring up wlan0 and assign IP before starting network services
+ip link set wlan0 up
+ip addr add 10.98.76.5/24 dev wlan0
+# Ensure /home/fap is accessible for tshark
+chmod 755 /home/fap
+# Restart dnsmasq to ensure DHCP works
+systemctl restart dnsmasq
 # Print the IP address
 _IP=$(hostname -I) || true
 if [ "$_IP" ]; then
