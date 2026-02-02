@@ -8,3 +8,7 @@ sudo echo "wpa_passphrase="$r |sudo /usr/bin/tee --append  /etc/hostapd.conf
 
 
 sudo hostapd -B /etc/hostapd.conf -dd -t -f /tmp/hostapd.log
+
+# Ensure wlan0 has correct IP and restart dnsmasq for DHCP
+sudo ip addr add 10.98.76.5/24 dev wlan0
+sudo systemctl restart dnsmasq

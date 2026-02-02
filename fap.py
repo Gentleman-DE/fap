@@ -94,7 +94,12 @@ def unbound_mgmt(target_list):
     target = target_list[0]
     type_of_target = target_list[1]  # 1 = template, 2= unqiue, 3 = list
     print_delimiter()
+
     print(">> Creating unbound setup to whitelist for ", target)
+    # Always clear whitelist.conf before applying new rules
+    with open(UNBOUND_CONF, "w") as f:
+        f.write('# this redirects everything to 127.0.0.111\nserver:\nlocal-zone: "." redirect\nlocal-data: ". IN A 127.0.0.111"\n')
+    # Now add template items as usual
     if os.path.exists(UNBOUND_CONF):  # check, if file is existing, otherwise FAP was disabled
         logging.info("Unbound whitelist file exists")
         copyfile(UNBOUND_CONF, "unbound_orig") # backup
