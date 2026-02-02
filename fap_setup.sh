@@ -15,7 +15,7 @@
 # spiegelt aber keine Daten mehr auf eth1 und benötigt eth1 somit nicht mehr
 # EXPERT=1: OVS wird installiert und konfiguriert
 # EXPERT=0: OVS wird installiert, aber nicht konfiguriert 
-EXPERT=1
+EXPERT=0
 
 
 # Ab hier am besten nichts mehr ändern ;-)
