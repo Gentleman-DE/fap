@@ -3,10 +3,6 @@ sudo lsof -i :53
 nmcli radio
 rfkill list
 
-# disable dnsmasq autostart
-sudo systemctl disable dnsmasq
-sudo systemctl disable unbound
-
 # Stop services
 sudo systemctl stop dnsmasq
 sudo killall dnsmasq
