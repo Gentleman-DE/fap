@@ -1,0 +1,4 @@
+- changes br0 to wlan0
+- fixed DHCP range in dnsmasq.conf
+- automated wlan0 bring-up and IP assignment in rc.local
+- automated /home/fap permission fix for tshark pcap writing

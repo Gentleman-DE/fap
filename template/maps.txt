@@ -21,3 +21,14 @@ android.clients.google.com
 geomobileservices-pa.googleapis.com
 glpals.com
 supl.google.com
+semanticlocation-pa.googleapis.com 
+geller-pa.googleapis.com
+firebaseinstallations.googleapis.com
+mobilemaps-pa-gz.googleapis.com
+mobilemaps.googleapis.com
+arcore.googleapis.com
+spot-pa.googleapis.com
+android-context-data.googleapis.com
+scone-pa.googleapis.com
+feedback-pa.googleapis.com
+android.googleapis.com
