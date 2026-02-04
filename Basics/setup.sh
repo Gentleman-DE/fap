@@ -1,5 +1,5 @@
 # dependencies
-sudo apt install -y vim git hostapd iptables-persistent unbound ipset tshark dnsmasq
+sudo apt install -y vim git hostapd iptables-persistent unbound ipset tshark dnsmasq dnsutils
 
 # disable dnsmasq autostart
 sudo systemctl disable dnsmasq
