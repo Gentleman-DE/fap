@@ -17,8 +17,9 @@ if [ "$_IP" ]; then
   printf "My IP address is %s\n" "$_IP"
 fi
 
-# ipset aktivieren
-ipset destroy
+# ipset aktivieren (destroy specific sets if they exist, ignore errors)
+ipset destroy WL 2>/dev/null || true
+ipset destroy admin 2>/dev/null || true
 ipset create WL hash:ip
 ipset create admin hash:ip
 
@@ -34,10 +35,12 @@ iptables-restore < /home/fap/src/forward.txt
 /home/fap/src/ovs.sh
 printf "IP: $_IP"
 
-# br0 IP in iptables
-IP=$(ip -4 addr show br0|grep -oP "(?<=inet ).*(?=/)")
-echo $IP
-ipset add admin $IP
+# br0 IP in iptables (use awk for portability)
+IP=$(ip -4 addr show br0 | awk '/inet /{print $2}' | cut -d/ -f1)
+if [ -n "$IP" ]; then
+  echo $IP
+  ipset add admin $IP
+fi
 
 # Starte Ueberwachung der Zieldatei
 /home/fap/fifo.sh &

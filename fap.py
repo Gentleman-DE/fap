@@ -21,7 +21,23 @@ TEMPLATEDIR = "/home/fap/template"
 HOMEDIR = "/home/fap/src/"
 UNBOUND_CONF = "/etc/unbound/unbound.conf.d/whitelist.conf"
 
-logging.basicConfig(filename='fap.log', filemode='w', format='%(asctime)s %(message)s', level=logging.DEBUG)
+
+# Setup verbose logging with timestamped logfile in /home/fap/logs/[timestamp]
+def setup_logging():
+    log_dir = '/home/fap/logs'
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_file = f'{log_dir}/{timestamp}.log'
+    logging.basicConfig(
+        filename=log_file,
+        filemode='w',
+        format='%(asctime)s %(levelname)s %(message)s',
+        level=logging.DEBUG
+    )
+    logging.info(f'Logging started in {log_file}')
+
+setup_logging()
 
 
 parser=argparse.ArgumentParser(description="FAP CLI", prog='fap.py', usage='%(prog)s [options]')
@@ -47,15 +63,21 @@ args = parser.parse_args()
 def start_tshark():
     print_delimiter()
     print(">> Starting tshark")
+    logging.info("Starting tshark")
     print("Checking for fifo.sh")
+    logging.info("Checking for fifo.sh")
     fifo_id = find_pid("fifo.sh")
     if len(fifo_id) == 0:
         print("Fifo script not started, restarting it:")
-        os.system("/home/fap/fifo.sh &")
+        logging.info("Fifo script not started, restarting it")
+        ret = os.system("/home/fap/fifo.sh &")
+        logging.info(f"fifo.sh started, return code: {ret}")
         time.sleep(1)
     else:
         print("Fifo script id is: ", fifo_id)
-    os.system("/home/fap/tshark.sh &")
+        logging.info(f"Fifo script id is: {fifo_id}")
+    ret = os.system("/home/fap/tshark.sh &")
+    logging.info(f"tshark.sh started, return code: {ret}")
     time.sleep(2)
 
 
@@ -72,7 +94,7 @@ def manageListOfEntries(loe):
         # Check IP
         if checkIP(r):
             logging.info(r + " is a valid IP-address")
-            addIPtoFirewall(r)
+            ip_list.append(r)
         else:
             fqdn_list.append(r)
     for ip in ip_list:
@@ -81,7 +103,9 @@ def manageListOfEntries(loe):
 
 
 # Check, if the given parameter is a valid ip-address
+
 def checkIP(ip):
+    logging.info(f"checkIP called with: {ip}")
     try:
         ipaddress.ip_address(ip)
         return True
@@ -94,18 +118,18 @@ def unbound_mgmt(target_list):
     target = target_list[0]
     type_of_target = target_list[1]  # 1 = template, 2= unqiue, 3 = list
     print_delimiter()
-    print(">> Creating unbound setup to whitelist for ", target)
+    print("Creating unbound setup to whitelist for", target)
+
     if os.path.exists(UNBOUND_CONF):  # check, if file is existing, otherwise FAP was disabled
         logging.info("Unbound whitelist file exists")
-        copyfile(UNBOUND_CONF, "unbound_orig") # backup
+        copyfile(UNBOUND_CONF, "unbound_orig")  # backup
     else:
         copyfile("/etc/unbound/restricted", UNBOUND_CONF)
 
     if type_of_target == 1:
-        #print("Template file")
         dir = TEMPLATEDIR + "/" + target
         if os.path.exists(dir):
-            logging.info("template file choosen")
+            logging.info("template file chosen")
             insert_template_file(target)
         else:
             print("Added invalid template file, please check '-i'")
@@ -115,18 +139,17 @@ def unbound_mgmt(target_list):
         logging.info("Unique service")
         insert_single_line(target)
     else:
-        # target is a list of entries
         logging.info("list of entries as targets")
         fqdn = manageListOfEntries(args.multiple)
         for name in fqdn:
             insert_single_line(name)
 
-    # restart unbound
     os.system("systemctl restart unbound")
 
 
 # Add a new line for the unique service
 def insert_single_line(t):
+    logging.info(f"insert_single_line called with: {t}")
     file = open(UNBOUND_CONF, "a")
     insert_line = "local-zone: \"" + t + "\" transparent\n"
     logging.info("%s", insert_line)
@@ -135,23 +158,6 @@ def insert_single_line(t):
 
 
 # Add the content of a template file to unbound
-# def insert_template_file_old(t):
-#     print("Add template file ", t)
-#     file = open(UNBOUND_CONF, "a")
-#     t_file = DATADIR + "/" + t
-#     template = open(t_file, "r")
-#     for line in template:
-#         if (line[0] == "*"):  # this is an ip-address and no fqdn, just add it to ipset WL
-#             logging.info(line[2:])
-#             addIPtoFirewall(line[2:])
-#         else:
-#             insert_line = "local-zone: " + line.rstrip() + " transparent\n"
-#             print("Adding ", insert_line, end = '')
-#             file.write(insert_line)
-#     file.close()
-#     template.close()
-
-    # Add the content of a template file to unbound
 def insert_template_file(t):
     print("Use template file ", t)
     file = open(UNBOUND_CONF, "a")
@@ -161,12 +167,12 @@ def insert_template_file(t):
         if line[0] == ">":  # this is the name of the service of this templatefile
             logging.info(line[2:])
             print(f"Service {line[2:-1]} choosen")
-        elif (line[0] == "+"):  # this is an ip-address and no fqdn, just add it to ipset WL
+        elif line[0] == "+":  # this is an ip-address and no fqdn, just add it to ipset WL
             logging.info(line[:])
             addIPtoFirewall(line[1:])
         else:
             insert_line = "local-zone: " + line.rstrip() + " transparent\n"
-            print("Adding ", insert_line, end = '')
+            print("Adding ", insert_line, end='')
             file.write(insert_line)
     file.close()
     template.close()
@@ -174,10 +180,11 @@ def insert_template_file(t):
 
 # finally, let's start fapping
 def fap_start(acl, target_list):
+    logging.info(f"fap_start called with acl={acl}, target_list={target_list}")
     if acl == "WL":
         unbound_mgmt(target_list)
- #   else:
-  #      novelty_detection()
+    #   else:
+    #      novelty_detection()
     print_delimiter()
     print(">> Enabling ip_forwarding:")
     os.system("sysctl -w net.ipv4.ip_forward=1")
@@ -210,6 +217,7 @@ def fap_start(acl, target_list):
 
 # Reset all values and the environemnt
 def reset_ALL(t):
+    logging.info(f"reset_ALL called at {t}")
     # Reset unbound
     print("Restore unbound")
     copyfile("unbound_orig", UNBOUND_CONF)  # backup
@@ -247,6 +255,7 @@ def reset_ALL(t):
 # Create the correct environment based on the choosen parameters
 # return true, if real investigation is requested; all other params request info or status
 def createEnv():
+    logging.info("createEnv called")
     logging.info("Arguments: %s", args)
     # Which access control is choosen?
     if args.status:
@@ -262,6 +271,7 @@ def createEnv():
 
 # Get the application, which should be permitted
 def getApp():
+    logging.info("getApp called")
     if (args.target == None) and (args.unique == None) and (args.multiple == None):
         print("Please choose an application by the '-t' parameter or a unique target by '-u' or a list by '--multiple'")
         return False
@@ -277,6 +287,7 @@ def getApp():
 
 # Return the choosen single website
 def getUniqueApp():
+    logging.info("getUniqueApp called")
     print(args.unique)
 
 
@@ -285,6 +296,7 @@ def getUniqueApp():
 # otherwise it is unique and 2 or list and 3
 # To be honest, this seems to be not very useful
 def getTarget():
+    logging.info("getTarget called")
     if(args.target is not None):
         return (args.target, 1)
     if (args.unique is not None):
@@ -294,6 +306,7 @@ def getTarget():
 
 # List all available services (new)
 def listServices():
+    logging.info("listServices called")
     print("Available templates for filtering in the new version")
     if not args.debug:
         print(colored("Choose debug mode (-d) for a lists of entries", "blue"))
@@ -327,6 +340,7 @@ def listServices():
 
 # Stop FAP and finish limitation in network name translation
 def stopFAP():
+    logging.info("stopFAP called")
     print("Stopping FAP and returning to unsecure environment")
     # Unbound reset
     os.system("mv /etc/unbound/unbound.conf.d/whitelist.conf /etc/unbound/restricted")
@@ -335,6 +349,7 @@ def stopFAP():
 
 # Create a new WLAN environment
 def restartWLAN():
+    logging.info("restartWLAN called")
     print("WLAN settings will be erased...")
     os.system("/home/fap/src/hostapd_start.sh")
     os.system("sudo hostapd -B /etc/hostapd.conf")
@@ -346,6 +361,7 @@ def restartWLAN():
 # Not the best solution, because we use a specific delimiter (:) which might appear in a SSID or PSK
 # I should improve it with subprocess....
 def defineWLAN(values):
+    logging.info(f"defineWLAN called with values: {values}")
     print("WLAN settings will be set to given values...", values)
     ssid: str = values.split(":")[0]
     key: str = values[len(ssid)+1:]
@@ -358,12 +374,14 @@ def defineWLAN(values):
 
 # Repair corrupted dns-settings
 def resetUnbound():
+    logging.info("resetUnbound called")
     os.system("cp src/unbound_start /etc/unbound/restricted")
     copyfile("/etc/unbound/restricted", UNBOUND_CONF)
     os.system("/etc/init.d/unbound restart")
 
 # Ausgabeverzeichnis setzen
 def getOutputDirectory():
+    logging.info("getOutputDirectory called")
     ts = formatTime(getTime())
     if args.output:
         o = args.output
@@ -401,7 +419,8 @@ def check_2nd_nic():
 # Add the IP address to the ipset WL, useful for hardcoded IP addresses without any assigned DNS-request
 def addIPtoFirewall(ip):
     string = "ipset add WL " + ip
-    print(colored("Added IP address " + ip[:-1] + " to iptables whitelist", "green"))
+    # print the full IP (don't strip characters)
+    print(colored("Added IP address " + ip + " to iptables whitelist", "green"))
     os.system(string)
 
 

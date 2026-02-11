@@ -24,11 +24,16 @@ def createServiceList(d):
 
 
 def serviceMapping():
-    file = open(MAPPING_FILE, "r")
     zuordnung = {}
-    for line in file:
-        m, n = line.split(":")
-        zuordnung[m] = n
+    if not os.path.isfile(MAPPING_FILE):
+        return zuordnung
+    with open(MAPPING_FILE, "r") as file:
+        for line in file:
+            line = line.strip()
+            if not line or ':' not in line:
+                continue
+            m, n = line.split(":", 1)
+            zuordnung[m.strip()] = n.strip()
     return zuordnung
 
 
