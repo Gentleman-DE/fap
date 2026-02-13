@@ -172,6 +172,7 @@ unset DEBIAN_FRONTEND
 echo "*** Installiere dnsmasq"
 apt-get -y install dnsmasq
 cp ./src/dnsmasq.conf /etc/
+cp ./lib/dhcpv6.conf /etc/dnsmasq.d/dhcpv6.conf
 
 # Fifo erstellen
 echo "*** Erstelle fifo"
