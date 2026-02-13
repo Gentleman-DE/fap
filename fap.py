@@ -13,16 +13,17 @@ import logging
 import glob
 from lib.ipv6 import *
 from lib.status import *
+import subprocess
+import threading
 
-VERSION = "0.8.8"
-DATUM = "07.03.2024"
+VERSION = "0.8.9"
+DATUM = "12.02.2026"
 DATADIR = "/var/www/html/fap/messenger"
 TEMPLATEDIR = "/home/fap/template"
 HOMEDIR = "/home/fap/src/"
 UNBOUND_CONF = "/etc/unbound/unbound.conf.d/whitelist.conf"
 
 
-# Setup verbose logging with timestamped logfile in /home/fap/logs/[timestamp]
 def setup_logging():
     log_dir = '/home/fap/logs'
     if not os.path.exists(log_dir):
@@ -58,51 +59,116 @@ group.add_argument("--set", help = "Define the SSID and Key for a known wifi-env
 args = parser.parse_args()
 
 
+def is_ipv6(ip_str):
+    try:
+        ipaddress.IPv6Address(ip_str)
+        return True
+    except (ipaddress.AddressValueError, ValueError):
+        return False
 
-# Everything about packet capture
+
+def add_ip_to_ipset(ip: str):
+    ip = ip.strip()
+    if not ip:
+        return
+    
+    try:
+        if is_ipv6(ip):
+            ipset_name = "WL6"
+        else:
+            ipset_name = "WL"
+        
+        subprocess.run(
+            ["sudo", "ipset", "add", ipset_name, ip],
+            check=False,
+            capture_output=True
+        )
+        logging.info(f"ip added {ip} to {ipset_name}")
+        with open("./wl.log", "a") as log_file:
+            log_file.write(f"ip added {ip} to {ipset_name}\n")
+    except Exception as e:
+        logging.error(f"Failed to add IP {ip}: {e}")
+
+
+def process_line(line: str):
+    line = line.strip()
+    if not line:
+        return
+    
+    if "," in line:
+        ips = line.split(",")
+        for ip in ips:
+            add_ip_to_ipset(ip.strip())
+    else:
+        add_ip_to_ipset(line)
+
+
 def start_tshark():
     print_delimiter()
     print(">> Starting tshark")
     logging.info("Starting tshark")
-    print("Checking for fifo.sh")
-    logging.info("Checking for fifo.sh")
-    fifo_id = find_pid("fifo.sh")
-    if len(fifo_id) == 0:
-        print("Fifo script not started, restarting it:")
-        logging.info("Fifo script not started, restarting it")
-        ret = os.system("/home/fap/fifo.sh &")
-        logging.info(f"fifo.sh started, return code: {ret}")
-        time.sleep(1)
-    else:
-        print("Fifo script id is: ", fifo_id)
-        logging.info(f"Fifo script id is: {fifo_id}")
-    ret = os.system("/home/fap/tshark.sh &")
-    logging.info(f"tshark.sh started, return code: {ret}")
-    time.sleep(2)
+    
+    tshark_cmd = [
+        "tshark",
+        "-i", "wlan0",
+        "-f", "src port 53",
+        "-l",
+        "-w", "/tmp/test.pcap",
+        "-T", "fields",
+        "-e", "dns.a",
+        "-e", "dns.aaaa",
+        "-E", "occurrence=f"
+    ]
+    
+    try:
+        process = subprocess.Popen(
+            tshark_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
+        )
+        logging.info(f"tshark started with PID: {process.pid}")
+        print(f"tshark started with PID: {process.pid}")
+        
+        def read_output():
+            for line in process.stdout:
+                logging.debug(f"tshark output: {line.strip()}")
+                process_line(line)
+        
+        reader_thread = threading.Thread(target=read_output, daemon=True)
+        reader_thread.start()
+        
+        return process
+        
+    except Exception as e:
+        logging.error(f"Failed to start tshark: {e}")
+        print(f"Failed to start tshark: {e}")
+        return None
 
 
-# Manage input of --multiple
-# Extract ips and fqdn
-# Each IP is submitted to the ipset WL, every other entry is handled as a fqdn
-# and inserted into the unbound WL, it just does not care about any values ... (be careful)
 def manageListOfEntries(loe):
     logging.info(loe)
     result = loe.split(",")
     ip_list = []
+    ipv6_list = []
     fqdn_list = []
     for r in result:
-        # Check IP
         if checkIP(r):
-            logging.info(r + " is a valid IP-address")
-            ip_list.append(r)
+            if is_ipv6(r):
+                logging.info(r + " is a valid IPv6 address")
+                ipv6_list.append(r)
+            else:
+                logging.info(r + " is a valid IPv4 address")
+                ip_list.append(r)
         else:
             fqdn_list.append(r)
     for ip in ip_list:
         addIPtoFirewall(ip)
+    for ipv6 in ipv6_list:
+        addIPv6toFirewall(ipv6)
     return fqdn_list
 
-
-# Check, if the given parameter is a valid ip-address
 
 def checkIP(ip):
     logging.info(f"checkIP called with: {ip}")
@@ -112,19 +178,19 @@ def checkIP(ip):
     except:
         return False
 
-# All necessary steps to create a secure environment based on unbound
+
 def unbound_mgmt(target_list):
     logging.info(target_list)
     target = target_list[0]
-    type_of_target = target_list[1]  # 1 = template, 2= unqiue, 3 = list
+    type_of_target = target_list[1]
     print_delimiter()
     print("Creating unbound setup to whitelist for", target)
 
-    if os.path.exists(UNBOUND_CONF):  # check, if file is existing, otherwise FAP was disabled
+    if os.path.exists(UNBOUND_CONF):
         logging.info("Unbound whitelist file exists")
-        copyfile(UNBOUND_CONF, "unbound_orig")  # backup
+        copyfile(UNBOUND_CONF, "unbound_orig")
     else:
-        copyfile("/etc/unbound/restricted", UNBOUND_CONF)
+        copyfile("/home/fap/src/unbound_start", UNBOUND_CONF)
 
     if type_of_target == 1:
         dir = TEMPLATEDIR + "/" + target
@@ -146,57 +212,55 @@ def unbound_mgmt(target_list):
 
     os.system("systemctl restart unbound")
 
-
-# Add a new line for the unique service
 def insert_single_line(t):
     logging.info(f"insert_single_line called with: {t}")
     file = open(UNBOUND_CONF, "a")
-    insert_line = "local-zone: \"" + t + "\" transparent\n"
+    insert_line = "    local-zone: \"" + t + "\" transparent\n"
     logging.info("%s", insert_line)
     file.write(insert_line)
     file.close()
 
 
-# Add the content of a template file to unbound
 def insert_template_file(t):
     print("Use template file ", t)
     file = open(UNBOUND_CONF, "a")
     t_file = TEMPLATEDIR + "/" + t
     template = open(t_file, "r")
     for line in template:
-        if line[0] == ">":  # this is the name of the service of this templatefile
+        if line[0] == ">":
             logging.info(line[2:])
             print(f"Service {line[2:-1]} choosen")
-        elif line[0] == "+":  # this is an ip-address and no fqdn, just add it to ipset WL
+        elif line[0] == "+":
             logging.info(line[:])
-            addIPtoFirewall(line[1:])
+            ip_entry = line[1:].strip()
+            if is_ipv6(ip_entry):
+                addIPv6toFirewall(ip_entry)
+            else:
+                addIPtoFirewall(ip_entry)
         else:
-            insert_line = "local-zone: " + line.rstrip() + " transparent\n"
+            insert_line = "    local-zone: " + line.rstrip() + " transparent\n"
             print("Adding ", insert_line, end='')
             file.write(insert_line)
     file.close()
     template.close()
 
 
-# finally, let's start fapping
 def fap_start(acl, target_list):
     logging.info(f"fap_start called with acl={acl}, target_list={target_list}")
     if acl == "WL":
         unbound_mgmt(target_list)
-    #   else:
-    #      novelty_detection()
     print_delimiter()
     print(">> Enabling ip_forwarding:")
     os.system("sysctl -w net.ipv4.ip_forward=1")
+    os.system("sysctl -w net.ipv6.conf.all.forwarding=1")
+    os.system("systemctl restart dnsmasq")
     start_tshark()
-    # Finally, happy fapping
     start = timeit.default_timer()
     print_delimiter()
     print("Started fapping at " + getTime() + " ;-)")
     print("Here are some information:")
     print("----------------------------")
     print("PID of running tshark-process " + colored(str(get_pid("tshark")), "yellow"))
-    #print("Press 'x' to stop the process")
     print("Press any other key for status information")
     stop = ""
     while True:
@@ -215,20 +279,21 @@ def fap_start(acl, target_list):
             getStatus()
 
 
-# Reset all values and the environemnt
 def reset_ALL(t):
     logging.info(f"reset_ALL called at {t}")
-    # Reset unbound
     print("Restore unbound")
-    copyfile("unbound_orig", UNBOUND_CONF)  # backup
-    # Store ipset output in textfile
+    copyfile("unbound_orig", UNBOUND_CONF)
+    
     uhr = formatTime(getTime())
     filename = "iplist_" + uhr + ".txt"
-    export = "ipset list WL >>" + filename
+    
     print("Preserve iplist entries in " + filename)
-    os.system(export)
-    # Flush ipset
+    os.system("ipset list WL >> " + filename)
+    os.system("ipset list WL6 >> " + filename)
+    
     os.system("ipset flush WL")
+    os.system("ipset flush WL6")
+    
     print("Stopping capture process")
     id = get_pid("tshark")
     id = id.decode("utf-8")
@@ -246,18 +311,14 @@ def reset_ALL(t):
         os.system(string)
     print("Finished process")
     print("Capture file with dns request is stored at '/home/fap/pcap/capture_" + formatTime(t) + ".pcap'")
-    os.system("sudo mv /home/fap/pcap/test.pcap /home/fap/pcap/capture_" + formatTime(t) + ".pcap")
+    os.system("sudo mv /tmp/test.pcap /home/fap/pcap/capture_" + formatTime(t) + ".pcap")
     os.system("sudo chown fap:fap /home/fap/pcap/capture_" + formatTime(t) + ".pcap")
     print("Restart lighttpd web interface")
     os.system("systemctl start lighttpd")
 
-
-# Create the correct environment based on the choosen parameters
-# return true, if real investigation is requested; all other params request info or status
 def createEnv():
     logging.info("createEnv called")
     logging.info("Arguments: %s", args)
-    # Which access control is choosen?
     if args.status:
         getStatus()
         return False
@@ -269,7 +330,6 @@ def createEnv():
         return True
 
 
-# Get the application, which should be permitted
 def getApp():
     logging.info("getApp called")
     if (args.target == None) and (args.unique == None) and (args.multiple == None):
@@ -285,16 +345,11 @@ def getApp():
         return True
 
 
-# Return the choosen single website
 def getUniqueApp():
     logging.info("getUniqueApp called")
     print(args.unique)
 
 
-# Returns a list of target and boolean value of uniqueness
-# if template, return of is args.target and 1
-# otherwise it is unique and 2 or list and 3
-# To be honest, this seems to be not very useful
 def getTarget():
     logging.info("getTarget called")
     if(args.target is not None):
@@ -304,50 +359,28 @@ def getTarget():
     if (args.multiple is not None):
         return (args.multiple, 3)
 
-# List all available services (new)
+
 def listServices():
     logging.info("listServices called")
     print("Available templates for filtering in the new version")
     if not args.debug:
         print(colored("Choose debug mode (-d) for a lists of entries", "blue"))
-    files = glob.glob(TEMPLATEDIR+"/*.txt") # structure is ['/home/fap/template/dummy.txt']
+    files = glob.glob(TEMPLATEDIR+"/*.txt")
     for file in files:
         filename = file.split("/")[4]
         with open(file) as f:
             print(colored(f.readline()[1:].lstrip()[:-1] + " - " + filename, "cyan"))
             if args.debug:
                 print(colored(f.read(),"magenta"))
-    
-
-# List all available services
-# def listServices_old():
-#     # get data
-#     if args.debug:
-#         createServiceList(DATADIR)
-#     else:
-#         print("Available templates for filtering")
-#         print(colored("Choose debug mode (-d) for a lists of fqdn", "blue"))
-#         sm = serviceMapping()
-#         print("Service \t Filename")
-#         print("--------\t ---------")
-#         for k in sm.keys():
-#             # Formatting foo
-#             tab = "\t"
-#             if len(k) < 7:
-#                 tab = "\t\t"
-#             print(k, tab, sm[k], end="")
 
 
-# Stop FAP and finish limitation in network name translation
 def stopFAP():
     logging.info("stopFAP called")
     print("Stopping FAP and returning to unsecure environment")
-    # Unbound reset
     os.system("mv /etc/unbound/unbound.conf.d/whitelist.conf /etc/unbound/restricted")
     os.system("/etc/init.d/unbound restart")
 
 
-# Create a new WLAN environment
 def restartWLAN():
     logging.info("restartWLAN called")
     print("WLAN settings will be erased...")
@@ -357,39 +390,163 @@ def restartWLAN():
     getWlanStatus()
     exit()
 
-# Create a new WLAN environment
-# Not the best solution, because we use a specific delimiter (:) which might appear in a SSID or PSK
-# I should improve it with subprocess....
-def defineWLAN(values):
+
+def defineWLAN(values: str):
     logging.info(f"defineWLAN called with values: {values}")
     print("WLAN settings will be set to given values...", values)
-    ssid: str = values.split(":")[0]
-    key: str = values[len(ssid)+1:]
-    cmd = "/home/fap/src/hostapd_defined_start.sh " + ssid + " "  + key
-    os.system(cmd)
-    os.system("sudo hostapd -B /etc/hostapd.conf")
+
+    if ":" not in values:
+        logging.error("Invalid WLAN values. Expected format 'SSID:KEY'")
+        print("Invalid WLAN values. Expected format 'SSID:KEY'")
+        exit(1)
+    ssid, key = values.split(":", 1)
+    ssid = ssid.strip()
+    key = key.strip()
+    if not ssid or not key:
+        logging.error("SSID or KEY empty after parsing")
+        print("SSID or KEY cannot be empty")
+        exit(1)
+
+    hostapd_conf_src = "/home/fap/src/hostapd.conf"
+    hostapd_conf_dst = "/etc/hostapd.conf"
+
+    def run(cmd, check=True, log_stdout=True, log_stderr=True):
+        try:
+            logging.debug(f"run: {' '.join(cmd)}")
+            res = subprocess.run(
+                cmd, check=check, capture_output=True, text=True
+            )
+            if log_stdout and res.stdout:
+                logging.debug(res.stdout.strip())
+            if log_stderr and res.stderr:
+                logging.debug(res.stderr.strip())
+            return res
+        except subprocess.CalledProcessError as e:
+            logging.error(
+                f"Command failed: {' '.join(cmd)}; "
+                f"rc={e.returncode}; stdout={e.stdout}; stderr={e.stderr}"
+            )
+            if check:
+                print(f"Command failed: {' '.join(cmd)}")
+                exit(1)
+            return e
+
+    def ensure_masquerade_rule():
+        cmd_check = [
+            "sudo",
+            "iptables",
+            "-t",
+            "nat",
+            "-C",
+            "POSTROUTING",
+            "-o",
+            "eth0",
+            "-j",
+            "MASQUERADE",
+        ]
+        cmd_add = [
+            "sudo",
+            "iptables",
+            "-t",
+            "nat",
+            "-A",
+            "POSTROUTING",
+            "-o",
+            "eth0",
+            "-j",
+            "MASQUERADE",
+        ]
+        cmd_check_ipv6 = [
+            "sudo",
+            "ip6tables",
+            "-t",
+            "nat",
+            "-C",
+            "POSTROUTING",
+            "-o",
+            "eth0",
+            "-j",
+            "MASQUERADE",
+        ]
+        cmd_add_ipv6 = [
+            "sudo",
+            "ip6tables",
+            "-t",
+            "nat",
+            "-A",
+            "POSTROUTING",
+            "-o",
+            "eth0",
+            "-j",
+            "MASQUERADE",
+        ]
+        
+        res = subprocess.run(cmd_check, capture_output=True, text=True)
+        if res.returncode == 0:
+            logging.debug("IPv4 MASQUERADE rule already present")
+        else:
+            logging.debug("IPv4 MASQUERADE rule missing; adding it")
+            add = subprocess.run(cmd_add, capture_output=True, text=True)
+            if add.returncode != 0:
+                logging.error(f"Failed to add IPv4 MASQUERADE rule: {add.stderr.strip()}")
+
+        res_ipv6 = subprocess.run(cmd_check_ipv6, capture_output=True, text=True)
+        if res_ipv6.returncode == 0:
+            logging.debug("IPv6 MASQUERADE rule already present")
+        else:
+            logging.debug("IPv6 MASQUERADE rule missing; adding it")
+            add_ipv6 = subprocess.run(cmd_add_ipv6, capture_output=True, text=True)
+            if add_ipv6.returncode != 0:
+                logging.error(f"Failed to add IPv6 MASQUERADE rule: {add_ipv6.stderr.strip()}")
+
+    run(["sudo", "systemctl", "stop", "hostapd"], check=False)
+    run(["sudo", "killall", "hostapd"], check=False)
+
+    run(["sudo", "rfkill", "unblock", "wlan"])
+    run(["sudo", "ip", "link", "set", "wlan0", "down"])
+    run(["sudo", "ip", "link", "set", "wlan0", "up"])
+
+    ensure_masquerade_rule()
+
+    run(["sudo", "ip", "addr", "flush", "dev", "wlan0"], check=False)
+    run(["sudo", "ip", "addr", "add", "10.98.76.5/24", "dev", "wlan0"])
+    run(["sudo", "ip", "addr", "add", "fd00::1/64", "dev", "wlan0"])
+    run(["sudo", "ip", "-6", "addr", "add", "fe80::1/64", "dev", "wlan0", "scope", "link"])
+
+    try:
+        copyfile(hostapd_conf_src, hostapd_conf_dst)
+        with open(hostapd_conf_dst, "a") as f:
+            f.write(f"\nssid={ssid}\n")
+            f.write(f"wpa_passphrase={key}\n")
+        logging.info(
+            f"hostapd.conf written to {hostapd_conf_dst} with ssid={ssid}"
+        )
+    except Exception as e:
+        logging.error(f"Failed to write hostapd.conf: {e}")
+        print("Failed to configure hostapd")
+        exit(1)
+
+    run(["sudo", "hostapd", "-B", "/etc/hostapd.conf"])
+    run(["sudo", "systemctl", "restart", "dnsmasq"])
+
     print("New WLAN Settings enabled")
     getWlanStatus()
     exit()
 
-# Repair corrupted dns-settings
+
 def resetUnbound():
     logging.info("resetUnbound called")
-    os.system("cp src/unbound_start /etc/unbound/restricted")
-    copyfile("/etc/unbound/restricted", UNBOUND_CONF)
-    os.system("/etc/init.d/unbound restart")
-
-# Ausgabeverzeichnis setzen
+    copyfile("/home/fap/src/unbound_start", UNBOUND_CONF)
+    os.system("systemctl restart unbound")
+    
 def getOutputDirectory():
     logging.info("getOutputDirectory called")
     ts = formatTime(getTime())
     if args.output:
         o = args.output
-        # Check if output dir exists, and ends with "/"
         if os.path.isdir(o):
             if o[-1] != "/":
                 o = o + "/"
-            # create filename
             pcapfile = o + "non_expert_" + ts + ".pcap"
             print(colored("Output directory set to " + o, "green"))
             print(">> Will copy all network packets to file: " + pcapfile)
@@ -399,16 +556,11 @@ def getOutputDirectory():
         else:
             print(colored("Wrong output directory for pcap export. Please check parameter -o ", "red"))
             exit()
-
     else:
-        # Check for installation type and second nic
         if not check_2nd_nic():
             print(colored("No output directory given, FAP will not capture any data", "red"))
-            #pcapfile = "/var/www/html/non_expert_" + ts + ".pcap"
-            #os.system("sudo tshark -Q -i wlan0 -w " + pcapfile + "&")
 
 
-# Determine the correct initalisation of the OVS-mirror
 def check_2nd_nic():
     if "dummy0" in os.listdir('/sys/class/net/'):
         return False
@@ -416,18 +568,25 @@ def check_2nd_nic():
         return True
 
 
-# Add the IP address to the ipset WL, useful for hardcoded IP addresses without any assigned DNS-request
 def addIPtoFirewall(ip):
+    ip = ip.strip()
     string = "ipset add WL " + ip
-    # print the full IP (don't strip characters)
     print(colored("Added IP address " + ip + " to iptables whitelist", "green"))
+    logging.info(f"Added IPv4 {ip} to firewall")
     os.system(string)
 
 
-# Start
+def addIPv6toFirewall(ip):
+    ip = ip.strip()
+    string = "ipset add WL6 " + ip
+    print(colored("Added IPv6 address " + ip + " to iptables whitelist", "cyan"))
+    logging.info(f"Added IPv6 {ip} to firewall")
+    os.system(string)
+
+
 if __name__ == '__main__':
     if len(sys.argv) == 1:
-        print(colored("Invalid Choice, please tell me what to do", "red"))  # Error at parameter list
+        print(colored("Invalid Choice, please tell me what to do", "red"))
     else:
         if args.version:
             print("Version: " + VERSION)
@@ -449,24 +608,20 @@ if __name__ == '__main__':
             defineWLAN(args.set)
             exit()
 
-        
-
-
-        if args.finish:  # reset FAP
+        if args.finish:
             stopFAP()
             print(colored("FAP stopped, unsecure environment active", "red"))
             print("To reduce risk of misconfiguration, ip_forwarding -> disabled")
             os.system("sysctl -w net.ipv4.ip_forward=0")
-        else:                  # Start FAP process with some initial checks
+            os.system("sysctl -w net.ipv6.conf.all.forwarding=0")
+        else:
             is_env_ready = createEnv()
             if is_env_ready:
                 appstart = getApp()
                 if appstart:
                     print(colored("Environment ok, lets start", "green"))
-                    # Stop webinterface to eradicate conflicts
                     print("Stopping webinterface")
                     os.system("systemctl stop lighttpd")
-                    # Define output
                     output = getOutputDirectory()
                     if output is None:
                         output = "/var/www/html/"

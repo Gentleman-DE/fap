@@ -1,9 +1,11 @@
-# this redirects everything to 127.0.0.111
 server:
-local-zone: "." redirect
-local-data: ". IN A 127.0.0.111"
-
-# override for whitelisted domains to resolve normally
-local-zone: "pool.ntp.org" transparent
-local-zone: "github.com" transparent
-
+    interface: 0.0.0.0
+    interface: ::
+    access-control: 0.0.0.0/0 refuse
+    access-control: 127.0.0.1/32 allow
+    access-control: ::1/128 allow
+    access-control: 10.98.76.0/24 allow
+    access-control: fd00::/64 allow
+    local-zone: "." redirect
+    local-data: ". IN A 127.0.0.111"
+    local-data: ". IN AAAA ::1"

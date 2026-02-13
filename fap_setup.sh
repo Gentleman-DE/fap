@@ -119,8 +119,8 @@ apt-get -y install python3-termcolor python3-netifaces
 # DNS unbound
 echo "*** Installiere Unbound"
 apt-get -y install unbound
-cp ./src/local.conf /etc/unbound/unbound.conf.d/
-cp ./src/whitelist_user.conf /etc/unbound/unbound.conf.d/whitelist.conf
+# cp ./src/local.conf /etc/unbound/unbound.conf.d/
+# cp ./src/whitelist_user.conf /etc/unbound/unbound.conf.d/whitelist.conf
 
 # Open vSwitch
 echo "*** Installiere openvswitch" 
@@ -154,6 +154,7 @@ ln -s /var/cache/munin/www /var/www/html/munin
 echo "*** Installiere ipset"
 apt-get -y install ipset
 cp ./src/forward.txt /home/fap/src/
+cp ./src/forward6.txt /home/fap/src/
 IP=`hostname -I | cut -d " " -f 1`
 echo $IP
 
@@ -166,10 +167,6 @@ echo "wireshark-common wireshark-common/install-setuid boolean true" | sudo debc
 export DEBIAN_FRONTEND=noninteractive
 apt-get -y install tshark
 unset DEBIAN_FRONTEND
-cp ./home_dir/tshark.sh /home/fap/tshark.sh
-cp ./home_dir/tshark_eth0.sh /home/fap/tshark_eth0.sh
-chmod a+x /home/fap/tshark.sh
-chmod a+x /home/fap/tshark_eth0.sh
 
 #dnsmasq
 echo "*** Installiere dnsmasq"
@@ -193,7 +190,6 @@ ntpdate 1.de.pool.ntp.org
 
 # Kopieren einiger Daten
 echo "*** Kopiere Daten"
-cp -Rv ./home_dir/* /home/fap/
 cp ./src/unbound* /home/fap/src/
 cp ./src/rc.local /etc/
 cp ./src/index.html /var/www/html/
@@ -207,13 +203,16 @@ chmod a+x /home/fap/src/*.sh
 chmod a+x /etc/rc.local
 
 # git update
-echo "*** git clone"
+# echo "*** git clone"
+# mkdir /home/fap/template/
+# cd /var/www/html
+# git clone https://github.com/dfeu/fap
+# cd -
+# cp /var/www/html/fap/template/* /home/fap/template/
+# cp ./src/whitelist_user.conf /var/www/html/fap/
+
 mkdir /home/fap/template/
-cd /var/www/html
-git clone https://github.com/dfeu/fap
-cd -
-cp /var/www/html/fap/template/* /home/fap/template/
-cp ./src/whitelist_user.conf /var/www/html/fap/
+cp ./template/* /home/fap/template
 
 # Rechte anpassen
 echo "*** Rechte in /home/fap anpassen"

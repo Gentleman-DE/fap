@@ -11,37 +11,40 @@
 #
 # By default this script does nothing.
 
-# Print the IP address
 _IP=$(hostname -I) || true
 if [ "$_IP" ]; then
   printf "My IP address is %s\n" "$_IP"
 fi
 
-# ipset aktivieren (destroy specific sets if they exist, ignore errors)
 ipset destroy WL 2>/dev/null || true
+ipset destroy WL6 2>/dev/null || true
 ipset destroy admin 2>/dev/null || true
+ipset destroy admin6 2>/dev/null || true
 ipset create WL hash:ip
+ipset create WL6 hash:ip family inet6
 ipset create admin hash:ip
+ipset create admin6 hash:ip family inet6
 
-# iptables restore
 iptables-restore < /home/fap/src/forward.txt
+ip6tables-restore < /home/fap/src/forward6.txt
 
-#hostapd
+cp /home/fap/src/unbound_start /etc/unbound/unbound.conf.d/whitelist.conf
+
 /home/fap/src/hostapd_start.sh
 
-# br0 aktivieren
-#ovs-vsctl --if-exists del-br br0
-#dhclient eth0
 /home/fap/src/ovs.sh
 printf "IP: $_IP"
 
-# br0 IP in iptables (use awk for portability)
 IP=$(ip -4 addr show br0 | awk '/inet /{print $2}' | cut -d/ -f1)
 if [ -n "$IP" ]; then
   echo $IP
   ipset add admin $IP
 fi
 
-# Starte Ueberwachung der Zieldatei
-/home/fap/fifo.sh &
+IPV6=$(ip -6 addr show br0 | awk '/inet6 /{print $2}' | cut -d/ -f1 | grep -v ^fe80)
+if [ -n "$IPV6" ]; then
+  echo $IPV6
+  ipset add admin6 $IPV6
+fi
+
 exit 0
