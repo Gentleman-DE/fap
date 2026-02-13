@@ -9,3 +9,5 @@ server:
     local-zone: "." redirect
     local-data: ". IN A 127.0.0.111"
     local-data: ". IN AAAA ::1"
+    local-zone: "pool.ntp.org" transparent
+    local-zone: "github.com" transparent
