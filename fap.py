@@ -586,7 +586,8 @@ def reset_ALL(t):
     if session:
         session.info(f"reset_ALL called at {t}")
     print("Restore unbound")
-    copyfile("unbound_orig", UNBOUND_CONF)
+    # copyfile("unbound_orig", UNBOUND_CONF)
+    resetUnbound()
 
     uhr = formatTime(getTime())
 
@@ -928,50 +929,74 @@ def addIPv6toFirewall(ip):
 if __name__ == '__main__':
     init_session()
     init_validator()
+    
+    start_time_for_reset = timeit.default_timer()
+    t_reset = getTime()
+    
+    if session:
+        session.info("Performing startup cleanup...")
+    print(colored(">>> Performing startup cleanup (reset_ALL)...", "cyan"))
+    
+    # We wrap this in a try/except to ensure we don't crash if it's the very first run
+    try:
+        reset_ALL(t_reset)
+    except Exception as e:
+        if session:
+            session.warning(f"Startup cleanup had a minor issue: {e}")
+        pass
 
-    if len(sys.argv) == 1:
-        print(colored("Invalid Choice, please tell me what to do", "red"))
-    else:
-        if args.version:
-            print("Version: " + VERSION)
-            print("Release: " + DATUM)
-            getWlanStatus()
-            exit()
-        if args.wlan:
-            print("Reset WLAN settings")
-            restartWLAN()
-        if args.ipv6:
-            print("Checking IPv6")
-            testIPv6()
-            exit()
-        if args.nameservice:
-            print(colored("Resetting Unbound Nameservice configuration for whitelisting", "magenta"))
-            resetUnbound()
-            exit()
-        if args.set:
-            defineWLAN(args.set)
-            exit()
-
-        if args.finish:
-            stopFAP()
-            print(colored("FAP stopped, unsecure environment active", "red"))
-            print("To reduce risk of misconfiguration, ip_forwarding -> disabled")
-            os.system("sysctl -w net.ipv4.ip_forward=0")
-            os.system("sysctl -w net.ipv6.conf.all.forwarding=0")
-            if session:
-                session.info("FAP stopped via -x flag, environment fully cleared")
-                session.close()
+    try:
+        if len(sys.argv) == 1:
+            print(colored("Invalid Choice, please tell me what to do", "red"))
         else:
-            is_env_ready = createEnv()
-            if is_env_ready:
-                appstart = getApp()
-                if appstart:
-                    print(colored("Environment ok, lets start", "green"))
-                    print("Stopping webinterface")
-                    os.system("systemctl stop lighttpd")
-                    output = getOutputDirectory()
-                    if output is None:
-                        output = "/var/www/html/"
-                    fap_start(getControl(), getTarget())
-                else:
-                    print(colored("Error. Please correct misconfiguration and start again", "red"))
+            if args.version:
+                print("Version: " + VERSION)
+                print("Release: " + DATUM)
+                getWlanStatus()
+                exit()
+            if args.wlan:
+                print("Reset WLAN settings")
+                restartWLAN()
+            if args.ipv6:
+                print("Checking IPv6")
+                testIPv6()
+                exit()
+            if args.nameservice:
+                print(colored("Resetting Unbound Nameservice configuration for whitelisting", "magenta"))
+                resetUnbound()
+                exit()
+            if args.set:
+                defineWLAN(args.set)
+                exit()
+
+            if args.finish:
+                stopFAP()
+                print(colored("FAP stopped, unsecure environment active", "red"))
+                print("To reduce risk of misconfiguration, ip_forwarding -> disabled")
+                os.system("sysctl -w net.ipv4.ip_forward=0")
+                os.system("sysctl -w net.ipv6.conf.all.forwarding=0")
+                if session:
+                    session.info("FAP stopped via -x flag, environment fully cleared")
+                    session.close()
+            else:
+                is_env_ready = createEnv()
+                if is_env_ready:
+                    appstart = getApp()
+                    if appstart:
+                        print(colored("Environment ok, lets start", "green"))
+                        print("Stopping webinterface")
+                        os.system("systemctl stop lighttpd")
+                        output = getOutputDirectory()
+                        if output is None:
+                            output = "/var/www/html/"
+                        fap_start(getControl(), getTarget())
+                    else:
+                        print(colored("Error. Please correct misconfiguration and start again", "red"))
+    except KeyboardInterrupt:
+        print("\n" + colored("Start interrupted by user (Ctrl+C). Cleaning up...", "yellow"))
+        t_interrupt = getTime()
+        reset_ALL(t_interrupt)
+        if session:
+            session.info("Script interrupted during startup")
+            session.close()
+        exit(0)
