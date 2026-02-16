@@ -19,7 +19,6 @@ COMMIT
 -A INPUT -p icmp -j ACCEPT
 -A INPUT -m set --match-set WL src -j ACCEPT
 -A INPUT -m set --match-set admin dst -j ACCEPT
--A FORWARD -p udp -j ACCEPT
 -A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
 -A FORWARD -m set --match-set WL dst -j ACCEPT
 -A FORWARD -m set --match-set WL src -j ACCEPT

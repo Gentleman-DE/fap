@@ -5,6 +5,7 @@ import argparse
 import datetime
 import re
 import ipaddress
+import fnmatch
 from termcolor import colored
 from lib.servicelist import *
 from shutil import copyfile
@@ -16,7 +17,7 @@ from lib.status import *
 import subprocess
 import threading
 
-VERSION = "0.9.0"
+VERSION = "0.9.2"
 DATUM = "16.02.2026"
 DATADIR = "/var/www/html/fap/messenger"
 TEMPLATEDIR = "/home/fap/template"
@@ -25,7 +26,60 @@ UNBOUND_CONF = "/etc/unbound/unbound.conf.d/whitelist.conf"
 LOOPBACK_IPS = {"127.0.0.1", "0.0.0.0", "::1", "::"}
 
 session = None
+tshark_capture = None
+tshark_parser = None
+domain_validator = None
 
+class DomainValidator:
+    def __init__(self):
+        self.allowed_patterns = set()
+        self.logger = logging.getLogger('fap')
+
+    def load_targets(self, type_of_target, target):
+        self.allowed_patterns.clear()
+        
+        # Always allow local domains
+        self.allowed_patterns.add("local")
+        self.allowed_patterns.add("lan")
+
+        if type_of_target == 1: # Template file
+            t_file = os.path.join(TEMPLATEDIR, target)
+            if os.path.exists(t_file):
+                with open(t_file, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith(">") or line.startswith("+"):
+                            continue
+                        self.add_pattern(line)
+        elif type_of_target == 2: # Unique
+            self.add_pattern(target)
+        elif type_of_target == 3: # List
+            fqdns = target.split(",")
+            for f in fqdns:
+                if not checkIP(f):
+                    self.add_pattern(f)
+
+        if session:
+            session.info(f"Loaded {len(self.allowed_patterns)} allowed domain patterns")
+
+    def add_pattern(self, pattern):
+        pattern = pattern.strip('"').strip("'")
+        self.allowed_patterns.add(pattern)
+
+    def is_allowed(self, domain):
+        domain = domain.rstrip(".")
+        
+        # Check exact match or subdomain match
+        for pattern in self.allowed_patterns:
+            # If pattern is "google.com", match "google.com" and "mail.google.com"
+            # But NOT "notgoogle.com"
+            if domain == pattern or domain.endswith("." + pattern):
+                return True
+            # Handle explicit wildcards like "*.google.com"
+            if "*" in pattern:
+                if fnmatch.fnmatch(domain, pattern):
+                    return True
+        return False
 
 class SessionLogger:
     def __init__(self):
@@ -55,9 +109,9 @@ class SessionLogger:
         self.allowed_file.flush()
 
         self.blocked_file = open(f'{self.session_dir}/blocked_domains.log', 'a')
-        self.blocked_file.write("# Blocked domains - redirected to loopback\n")
+        self.blocked_file.write("# Blocked domains - redirected to loopback OR not in whitelist\n")
         self.blocked_file.write(f"# Session started: {timestamp}\n")
-        self.blocked_file.write(f"# {'Timestamp':<26} {'Domain':<50} {'Loopback IP'}\n")
+        self.blocked_file.write(f"# {'Timestamp':<26} {'Domain':<50} {'Reason'}\n")
         self.blocked_file.write(f"# {'-'*26} {'-'*50} {'-'*40}\n")
         self.blocked_file.flush()
 
@@ -91,17 +145,17 @@ class SessionLogger:
             self.allowed_file.flush()
             self.logger.debug(f"ALLOWED: {domain} -> {ip}")
 
-    def log_blocked(self, domain, loopback_ip):
+    def log_blocked(self, domain, reason):
         with self._lock:
-            key = (domain, loopback_ip)
+            key = (domain, reason)
             if key in self._seen_blocked:
                 return
             self._seen_blocked.add(key)
             ts = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-            line = f"{ts}  {domain:<50} {loopback_ip}\n"
+            line = f"{ts}  {domain:<50} {reason}\n"
             self.blocked_file.write(line)
             self.blocked_file.flush()
-            self.logger.debug(f"BLOCKED: {domain} -> {loopback_ip}")
+            self.logger.debug(f"BLOCKED: {domain} -> {reason}")
 
     def get_pcap_path(self):
         return f'{self.session_dir}/capture.pcap'
@@ -124,8 +178,9 @@ class SessionLogger:
             f.write("\nFiles in this session:\n")
             f.write(f"  full.log              - Complete debug log\n")
             f.write(f"  allowed_domains.log   - Whitelisted domains with resolved IPs\n")
-            f.write(f"  blocked_domains.log   - Blocked domains redirected to loopback\n")
+            f.write(f"  blocked_domains.log   - Blocked domains (loopback or not whitelisted)\n")
             f.write(f"  capture.pcap          - Full packet capture\n")
+            f.write(f"  iplist.txt            - ipset dump at session end\n")
         self.logger.info(f"Summary written to {summary_path}")
 
     def close(self):
@@ -141,6 +196,11 @@ def init_session():
     global session
     session = SessionLogger()
     return session
+
+def init_validator():
+    global domain_validator
+    domain_validator = DomainValidator()
+    return domain_validator
 
 
 parser = argparse.ArgumentParser(
@@ -215,6 +275,15 @@ def process_line(line: str):
     ipv4 = parts[1].strip() if len(parts) > 1 else ""
     ipv6 = parts[2].strip() if len(parts) > 2 else ""
 
+    if not domain:
+        return
+
+    # Security Check: Is this domain in our whitelist?
+    if not domain_validator.is_allowed(domain):
+        if session:
+            session.log_blocked(domain, "Not in whitelist")
+        return
+
     resolved_ips = []
     if ipv4:
         resolved_ips.extend(ipv4.split(","))
@@ -227,26 +296,35 @@ def process_line(line: str):
             continue
 
         if is_loopback(ip):
-            if session and domain:
-                session.log_blocked(domain, ip)
+            if session:
+                session.log_blocked(domain, f"Loopback IP: {ip}")
         else:
-            if session and domain:
+            if session:
                 session.log_allowed(domain, ip)
             add_ip_to_ipset(ip)
 
 
 def start_tshark():
+    global tshark_capture, tshark_parser
     print_delimiter()
     print(">> Starting tshark")
     if session:
         session.info("Starting tshark")
 
-    tshark_cmd = [
+    capture_cmd = [
+        "tshark",
+        "-i", "wlan0",
+        "-f", "port 53",
+        "-w", "/tmp/test.pcap",
+        "-P", 
+        "-q"
+    ]
+
+    parser_cmd = [
         "tshark",
         "-i", "wlan0",
         "-f", "src port 53",
         "-l",
-        "-w", "/tmp/test.pcap",
         "-T", "fields",
         "-e", "dns.qry.name",
         "-e", "dns.a",
@@ -255,19 +333,38 @@ def start_tshark():
     ]
 
     try:
-        process = subprocess.Popen(
-            tshark_cmd,
+        tshark_capture = subprocess.Popen(
+            capture_cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        if session:
+            session.info(f"tshark capture started with PID: {tshark_capture.pid}")
+        print(f"tshark capture started with PID: {tshark_capture.pid}")
+
+        tshark_parser = subprocess.Popen(
+            parser_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1
         )
         if session:
-            session.info(f"tshark started with PID: {process.pid}")
-        print(f"tshark started with PID: {process.pid}")
+            session.info(f"tshark parser started with PID: {tshark_parser.pid}")
+        print(f"tshark parser started with PID: {tshark_parser.pid}")
+
+        def fix_perms():
+            time.sleep(1)
+            if os.path.exists("/tmp/test.pcap"):
+                try:
+                    os.chmod("/tmp/test.pcap", 0o666)
+                except:
+                    pass
+        
+        threading.Thread(target=fix_perms, daemon=True).start()
 
         def read_output():
-            for line in process.stdout:
+            for line in tshark_parser.stdout:
                 if session:
                     session.debug(f"tshark output: {line.strip()}")
                 process_line(line)
@@ -275,13 +372,42 @@ def start_tshark():
         reader_thread = threading.Thread(target=read_output, daemon=True)
         reader_thread.start()
 
-        return process
+        return tshark_capture
 
     except Exception as e:
         if session:
             session.error(f"Failed to start tshark: {e}")
         print(f"Failed to start tshark: {e}")
         return None
+
+
+def stop_tshark():
+    global tshark_capture, tshark_parser
+
+    if tshark_parser is not None:
+        try:
+            tshark_parser.terminate()
+            tshark_parser.wait(timeout=2)
+        except:
+            tshark_parser.kill()
+        tshark_parser = None
+
+    if tshark_capture is not None:
+        try:
+            print(f"Stopping capture process {tshark_capture.pid}...")
+            tshark_capture.terminate()
+            try:
+                tshark_capture.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                tshark_capture.kill()
+                tshark_capture.wait()
+            
+            if session:
+                session.info("Capture stopped successfully")
+        except Exception as e:
+            if session:
+                session.error(f"Error stopping capture: {e}")
+        tshark_capture = None
 
 
 def manageListOfEntries(loe):
@@ -325,6 +451,10 @@ def unbound_mgmt(target_list):
         session.info(target_list)
     target = target_list[0]
     type_of_target = target_list[1]
+    
+    # Load targets into validator for runtime checking
+    domain_validator.load_targets(type_of_target, target)
+
     print_delimiter()
     print("Creating unbound setup to whitelist for", target)
 
@@ -334,6 +464,12 @@ def unbound_mgmt(target_list):
         copyfile(UNBOUND_CONF, "unbound_orig")
     else:
         copyfile("/home/fap/src/unbound_start", UNBOUND_CONF)
+
+    # Enforce default blocking at Unbound level
+    file = open(UNBOUND_CONF, "a")
+    file.write("    # Default Block Rule\n")
+    file.write("    local-zone: \".\" refuse\n\n") 
+    file.close()
 
     if type_of_target == 1:
         dir = TEMPLATEDIR + "/" + target
@@ -376,6 +512,9 @@ def insert_template_file(t):
     t_file = TEMPLATEDIR + "/" + t
     template = open(t_file, "r")
     for line in template:
+        line = line.strip()
+        if not line: continue
+        
         if line[0] == ">":
             if session:
                 session.info(line[2:])
@@ -389,7 +528,7 @@ def insert_template_file(t):
             else:
                 addIPtoFirewall(ip_entry)
         else:
-            insert_line = "    local-zone: " + line.rstrip() + " transparent\n"
+            insert_line = "    local-zone: " + line + " transparent\n"
             print("Adding ", insert_line, end='')
             file.write(insert_line)
     file.close()
@@ -412,7 +551,10 @@ def fap_start(acl, target_list):
     print("Started fapping at " + getTime() + " ;-)")
     print("Here are some information:")
     print("----------------------------")
-    print("PID of running tshark-process " + colored(str(get_pid("tshark")), "yellow"))
+    if tshark_capture:
+        print("PID of capture tshark " + colored(str(tshark_capture.pid), "yellow"))
+    if tshark_parser:
+        print("PID of parser tshark  " + colored(str(tshark_parser.pid), "yellow"))
     if session:
         print("Session logs: " + colored(session.get_session_dir(), "cyan"))
     print("Press any other key for status information")
@@ -460,41 +602,28 @@ def reset_ALL(t):
     os.system("ipset flush WL")
     os.system("ipset flush WL6")
 
-    print("Stopping capture process")
-    try:
-        id = get_pid("tshark")
-        id = id.decode("utf-8").strip()
-        array = id.split("\n")
-        if len(array) > 1:
-            for elem in array:
-                if len(elem) > 0:
-                    print("Killing process " + elem)
-                    os.system("kill " + elem)
-        else:
-            if id:
-                print("Killing process id ", id)
-                os.system("kill " + id)
-    except subprocess.CalledProcessError:
-        if session:
-            session.warning("No tshark process found to kill (already exited)")
-        print(colored("No tshark process found (already stopped)", "yellow"))
-    except Exception as e:
-        if session:
-            session.error(f"Error stopping tshark: {e}")
-        print(colored(f"Error stopping tshark: {e}", "red"))
-
+    print("Stopping capture processes")
+    stop_tshark()
     print("Finished process")
 
     if session:
         pcap_dest = session.get_pcap_path()
-        copyfile("/tmp/test.pcap", pcap_dest)
-        os.remove("/tmp/test.pcap")
-        print(f"Capture file stored at '{pcap_dest}'")
+        if os.path.exists("/tmp/test.pcap"):
+            copyfile("/tmp/test.pcap", pcap_dest)
+            os.remove("/tmp/test.pcap")
+            print(f"Capture file stored at '{pcap_dest}'")
+        else:
+            if session:
+                session.warning("No pcap file found at /tmp/test.pcap")
+            print(colored("No pcap file found", "yellow"))
     else:
         pcap_dest = "/home/fap/pcap/capture_" + formatTime(t) + ".pcap"
-        copyfile("/tmp/test.pcap", pcap_dest)
-        os.remove("/tmp/test.pcap")
-        print("Capture file with dns request is stored at '" + pcap_dest + "'")
+        if os.path.exists("/tmp/test.pcap"):
+            copyfile("/tmp/test.pcap", pcap_dest)
+            os.remove("/tmp/test.pcap")
+            print("Capture file with dns request is stored at '" + pcap_dest + "'")
+        else:
+            print(colored("No pcap file found", "yellow"))
 
     print("Restart lighttpd web interface")
     os.system("systemctl start lighttpd")
@@ -567,8 +696,51 @@ def stopFAP():
     if session:
         session.info("stopFAP called")
     print("Stopping FAP and returning to unsecure environment")
+
+    print("Flushing ipset whitelists")
+    os.system("ipset flush WL")
+    os.system("ipset flush WL6")
+
+    print("Flushing iptables rules")
+    os.system("iptables -F")
+    os.system("iptables -t nat -F")
+    os.system("iptables -t mangle -F")
+    os.system("iptables -X")
+    os.system("ip6tables -F")
+    os.system("ip6tables -t nat -F")
+    os.system("ip6tables -t mangle -F")
+    os.system("ip6tables -X")
+
+    print("Setting default policies to ACCEPT")
+    os.system("iptables -P INPUT ACCEPT")
+    os.system("iptables -P FORWARD ACCEPT")
+    os.system("iptables -P OUTPUT ACCEPT")
+    os.system("ip6tables -P INPUT ACCEPT")
+    os.system("ip6tables -P FORWARD ACCEPT")
+    os.system("ip6tables -P OUTPUT ACCEPT")
+
+    print("Stopping capture processes")
+    stop_tshark()
+
+    print("Resetting unbound configuration")
     os.system("mv /etc/unbound/unbound.conf.d/whitelist.conf /etc/unbound/restricted")
-    os.system("/etc/init.d/unbound restart")
+    os.system("systemctl restart unbound")
+
+    print("Restarting dnsmasq")
+    os.system("systemctl restart dnsmasq")
+
+    print("Restarting lighttpd")
+    os.system("systemctl start lighttpd")
+
+    if os.path.exists("/tmp/test.pcap"):
+        if session:
+            pcap_dest = session.get_pcap_path()
+            copyfile("/tmp/test.pcap", pcap_dest)
+            os.remove("/tmp/test.pcap")
+            print(f"Capture file preserved at '{pcap_dest}'")
+        else:
+            os.remove("/tmp/test.pcap")
+            print("Removed leftover pcap from /tmp")
 
 
 def restartWLAN():
@@ -755,6 +927,7 @@ def addIPv6toFirewall(ip):
 
 if __name__ == '__main__':
     init_session()
+    init_validator()
 
     if len(sys.argv) == 1:
         print(colored("Invalid Choice, please tell me what to do", "red"))
@@ -785,6 +958,9 @@ if __name__ == '__main__':
             print("To reduce risk of misconfiguration, ip_forwarding -> disabled")
             os.system("sysctl -w net.ipv4.ip_forward=0")
             os.system("sysctl -w net.ipv6.conf.all.forwarding=0")
+            if session:
+                session.info("FAP stopped via -x flag, environment fully cleared")
+                session.close()
         else:
             is_env_ready = createEnv()
             if is_env_ready:

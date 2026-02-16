@@ -122,7 +122,7 @@ def createStats(start, ende):
 
 
 def getDNSRequest():
-    os.system("tshark -r /home/fap/pcap/test.pcap -T fields -e dns.qry.name -e dns.a")
+    os.system("tshark -r /tmp/test.pcap -T fields -e dns.qry.name -e dns.a")
 
 
 def getControl():
