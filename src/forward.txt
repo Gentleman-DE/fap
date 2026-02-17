@@ -1,34 +1,24 @@
 *nat
-:PREROUTING ACCEPT [179:19695]
-:INPUT ACCEPT [4:794]
-:OUTPUT ACCEPT [24:1693]
-:POSTROUTING ACCEPT [24:1693]
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+-A PREROUTING -i wlan0 -p udp -m udp --dport 53 -j DNAT --to-destination 10.98.76.5:53
+-A PREROUTING -i wlan0 -p tcp -m tcp --dport 53 -j DNAT --to-destination 10.98.76.5:53
 -A POSTROUTING -o eth0 -j MASQUERADE
 COMMIT
 *filter
-:INPUT DROP [4:640]
+:INPUT DROP [0:0]
 :FORWARD DROP [0:0]
-:OUTPUT DROP [0:0]
--A INPUT -p udp -m udp --dport 67 -j ACCEPT
--A INPUT -p udp -m udp --dport 68 -j ACCEPT
--A INPUT -p udp -m udp --dport 53 -j ACCEPT
--A INPUT -p tcp -m tcp --dport 22 -j ACCEPT
--A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+:OUTPUT ACCEPT [0:0]
 -A INPUT -i lo -j ACCEPT
--A INPUT -p udp -m udp --sport 53 -j ACCEPT
+-A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+-A INPUT -m set --match-set admin src -j ACCEPT
+-A INPUT -i wlan0 -p udp -m udp --dport 67 -j ACCEPT
+-A INPUT -i wlan0 -p udp -m udp --dport 53 -j ACCEPT
+-A INPUT -i wlan0 -p tcp -m tcp --dport 53 -j ACCEPT
+-A INPUT -p tcp -m tcp --dport 22 -j ACCEPT
 -A INPUT -p icmp -j ACCEPT
--A INPUT -m set --match-set WL src -j ACCEPT
--A INPUT -m set --match-set admin dst -j ACCEPT
 -A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
--A FORWARD -m set --match-set WL dst -j ACCEPT
--A FORWARD -m set --match-set WL src -j ACCEPT
--A OUTPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
--A OUTPUT -p tcp -m tcp --sport 22 -j ACCEPT
--A OUTPUT -o lo -j ACCEPT
--A OUTPUT -p udp -m udp --sport 53 -j ACCEPT
--A OUTPUT -p udp -m udp --dport 53 -j ACCEPT
--A OUTPUT -p udp -m udp --sport 67 -j ACCEPT
--A OUTPUT -p udp -m udp --dport 68 -j ACCEPT
--A OUTPUT -m set --match-set WL dst -j ACCEPT
--A OUTPUT -m set --match-set admin src -j ACCEPT
+-A FORWARD -i wlan0 -o eth0 -m set --match-set WL dst -j ACCEPT
 COMMIT

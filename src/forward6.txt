@@ -3,33 +3,24 @@
 :INPUT ACCEPT [0:0]
 :OUTPUT ACCEPT [0:0]
 :POSTROUTING ACCEPT [0:0]
+-A PREROUTING -i wlan0 -p udp -m udp --dport 53 -j DNAT --to-destination [fd00::1]:53
+-A PREROUTING -i wlan0 -p tcp -m tcp --dport 53 -j DNAT --to-destination [fd00::1]:53
 -A POSTROUTING -o eth0 -j MASQUERADE
 COMMIT
 *filter
 :INPUT DROP [0:0]
 :FORWARD DROP [0:0]
-:OUTPUT DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+-A INPUT -i lo -j ACCEPT
+-A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
 -A INPUT -p ipv6-icmp -m icmpv6 --icmpv6-type router-solicitation -j ACCEPT
 -A INPUT -p ipv6-icmp -m icmpv6 --icmpv6-type router-advertisement -j ACCEPT
 -A INPUT -p ipv6-icmp -m icmpv6 --icmpv6-type neighbor-solicitation -j ACCEPT
 -A INPUT -p ipv6-icmp -m icmpv6 --icmpv6-type neighbor-advertisement -j ACCEPT
--A INPUT -p udp -m udp --dport 546 -j ACCEPT
--A INPUT -p udp -m udp --dport 547 -j ACCEPT
--A INPUT -p udp -m udp --dport 53 -j ACCEPT
+-A INPUT -i wlan0 -p udp -m udp --dport 547 -j ACCEPT
+-A INPUT -i wlan0 -p udp -m udp --dport 53 -j ACCEPT
+-A INPUT -i wlan0 -p tcp -m tcp --dport 53 -j ACCEPT
 -A INPUT -p tcp -m tcp --dport 22 -j ACCEPT
--A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
--A INPUT -i lo -j ACCEPT
--A FORWARD -s fd00::/64 -m set --match-set WL6 dst -j ACCEPT
 -A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
--A OUTPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
--A OUTPUT -p tcp -m tcp --sport 22 -j ACCEPT
--A OUTPUT -o lo -j ACCEPT
--A OUTPUT -p udp -m udp --sport 53 -j ACCEPT
--A OUTPUT -p udp -m udp --dport 53 -j ACCEPT
--A OUTPUT -p udp -m udp --sport 547 -j ACCEPT
--A OUTPUT -p ipv6-icmp -m icmpv6 --icmpv6-type router-solicitation -j ACCEPT
--A OUTPUT -p ipv6-icmp -m icmpv6 --icmpv6-type router-advertisement -j ACCEPT
--A OUTPUT -p ipv6-icmp -m icmpv6 --icmpv6-type neighbor-solicitation -j ACCEPT
--A OUTPUT -p ipv6-icmp -m icmpv6 --icmpv6-type neighbor-advertisement -j ACCEPT
--A OUTPUT -m set --match-set WL6 dst -j ACCEPT
+-A FORWARD -i wlan0 -o eth0 -s fd00::/64 -m set --match-set WL6 dst -j ACCEPT
 COMMIT
