@@ -30,9 +30,9 @@ ip6tables-restore < /home/fap/src/forward6.txt
 
 cp /home/fap/src/unbound_start /etc/unbound/unbound.conf.d/whitelist.conf
 
-/home/fap/src/hostapd_start.sh
+# /home/fap/src/hostapd_start.sh
 
-/home/fap/src/ovs.sh
+# /home/fap/src/ovs.sh
 printf "IP: $_IP"
 
 IP=$(ip -4 addr show br0 | awk '/inet /{print $2}' | cut -d/ -f1)
