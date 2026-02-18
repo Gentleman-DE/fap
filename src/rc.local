@@ -30,7 +30,7 @@ ip6tables-restore < /home/fap/src/forward6.txt
 
 cp /home/fap/src/unbound_start /etc/unbound/unbound.conf.d/whitelist.conf
 
-# python3 /home/fap/fap.py -w
+/home/fap/src/hostapd_start.sh
 
 /home/fap/src/ovs.sh
 printf "IP: $_IP"
