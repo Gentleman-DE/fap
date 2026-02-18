@@ -418,14 +418,28 @@ def manageListOfEntries(loe):
     ipv6_list = []
     fqdn_list = []
     for r in result:
-        if checkIP(r):
-            if is_ipv6(r):
+        r = r.strip()
+        if "/" in r:  # Check for CIDR notation
+            try:
+                ip_network = ipaddress.ip_network(r, strict=False)
+                if ip_network.version == 6:
+                    os.system(f"ipset add WL6 {r}")
+                    print(colored(f"Added IPv6 range {r} to iptables whitelist", "cyan"))
+                    if session:
+                        session.info(f"Added IPv6 range {r} to firewall")
+                else:
+                    os.system(f"ipset add WL {r}")
+                    print(colored(f"Added IPv4 range {r} to iptables whitelist", "green"))
+                    if session:
+                        session.info(f"Added IPv4 range {r} to firewall")
+            except ValueError:
+                print(colored(f"Invalid CIDR range: {r}", "red"))
                 if session:
-                    session.info(r + " is a valid IPv6 address")
+                    session.error(f"Invalid CIDR range: {r}")
+        elif checkIP(r):
+            if is_ipv6(r):
                 ipv6_list.append(r)
             else:
-                if session:
-                    session.info(r + " is a valid IPv4 address")
                 ip_list.append(r)
         else:
             fqdn_list.append(r)
@@ -513,17 +527,35 @@ def insert_template_file(t):
     template = open(t_file, "r")
     for line in template:
         line = line.strip()
-        if not line: continue
-        
+        if not line:
+            continue
+
         if line[0] == ">":
             if session:
-                session.info(line[2:])
-            print(f"Service {line[2:-1]} choosen")
+                session.info(f"Service {line[2:-1]} chosen")
+            print(f"Service {line[2:-1]} chosen")
         elif line[0] == "+":
             if session:
-                session.info(line[:])
+                session.info(f"Adding IP or range: {line[1:].strip()}")
             ip_entry = line[1:].strip()
-            if is_ipv6(ip_entry):
+            if "/" in ip_entry:  # Check for CIDR notation
+                try:
+                    ip_network = ipaddress.ip_network(ip_entry, strict=False)
+                    if ip_network.version == 6:
+                        os.system(f"ipset add WL6 {ip_entry}")
+                        print(colored(f"Added IPv6 range {ip_entry} to iptables whitelist", "cyan"))
+                        if session:
+                            session.info(f"Added IPv6 range {ip_entry} to firewall")
+                    else:
+                        os.system(f"ipset add WL {ip_entry}")
+                        print(colored(f"Added IPv4 range {ip_entry} to iptables whitelist", "green"))
+                        if session:
+                            session.info(f"Added IPv4 range {ip_entry} to firewall")
+                except ValueError:
+                    print(colored(f"Invalid CIDR range: {ip_entry}", "red"))
+                    if session:
+                        session.error(f"Invalid CIDR range: {ip_entry}")
+            elif is_ipv6(ip_entry):
                 addIPv6toFirewall(ip_entry)
             else:
                 addIPtoFirewall(ip_entry)
