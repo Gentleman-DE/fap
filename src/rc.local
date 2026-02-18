@@ -20,8 +20,8 @@ ipset destroy WL 2>/dev/null || true
 ipset destroy WL6 2>/dev/null || true
 ipset destroy admin 2>/dev/null || true
 ipset destroy admin6 2>/dev/null || true
-ipset create WL hash:ip
-ipset create WL6 hash:ip family inet6
+ipset create WL hash:net family inet
+ipset create WL6 hash:net family inet6
 ipset create admin hash:ip
 ipset create admin6 hash:ip family inet6
 
@@ -29,7 +29,5 @@ iptables-restore < /home/fap/src/forward.txt
 ip6tables-restore < /home/fap/src/forward6.txt
 
 cp /home/fap/src/unbound_start /etc/unbound/unbound.conf.d/whitelist.conf
-
-
 
 exit 0
