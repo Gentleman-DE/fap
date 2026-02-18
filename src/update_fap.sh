@@ -60,26 +60,45 @@ echo ">>> Stopping services before update..."
 systemctl stop hostapd 2>/dev/null || true
 systemctl stop lighttpd 2>/dev/null || true
 
+echo ">>> Ensuring target directories exist..."
+mkdir -p /home/fap/src
+mkdir -p /home/fap/lib
+mkdir -p /home/fap/logs
+mkdir -p /home/fap/pcap
+
 echo ">>> Copying src/ files..."
 cp -v ./src/hostapd* /home/fap/src/
-cp -v ./src/wlan0 /etc/network/interfaces.d/
 cp -v ./src/unbound* /home/fap/src/
-cp -v ./src/rc.local /etc/
-cp -v ./src/index.html /var/www/html/
-cp -v ./src/dnsmasq.conf /etc/
-cp -v ./src/dhcpv6.conf /etc/dnsmasq.d/dhcpv6.conf
 cp -v ./src/forward.txt /home/fap/src/forward.txt
 cp -v ./src/forward6.txt /home/fap/src/forward6.txt
+
+if [ -d /etc/network/interfaces.d ]; then
+    cp -v ./src/wlan0 /etc/network/interfaces.d/
+else
+    echo ">>> SKIP: /etc/network/interfaces.d/ does not exist, skipping wlan0"
+fi
+
+[ -f ./src/rc.local ] && cp -v ./src/rc.local /etc/ || echo ">>> SKIP: src/rc.local not found"
+[ -f ./src/index.html ] && cp -v ./src/index.html /var/www/html/ || echo ">>> SKIP: src/index.html not found"
+[ -f ./src/dnsmasq.conf ] && cp -v ./src/dnsmasq.conf /etc/ || echo ">>> SKIP: src/dnsmasq.conf not found"
+
+if [ -f ./src/dhcpv6.conf ]; then
+    mkdir -p /etc/dnsmasq.d
+    cp -v ./src/dhcpv6.conf /etc/dnsmasq.d/dhcpv6.conf
+else
+    echo ">>> SKIP: src/dhcpv6.conf not found"
+fi
 
 if [ "$EXPERT" -eq 1 ]; then
     cp -v ./src/ovs.sh /home/fap/src/ovs.sh
 else
-    cp -v ./src/ovs_dummy.sh /home/fap/src/ovs.sh
+    [ -f ./src/ovs_dummy.sh ] && cp -v ./src/ovs_dummy.sh /home/fap/src/ovs.sh || echo ">>> SKIP: src/ovs_dummy.sh not found"
 fi
-chmod a+x /home/fap/src/ovs.sh
+[ -f /home/fap/src/ovs.sh ] && chmod a+x /home/fap/src/ovs.sh
 
 echo ">>> Copying main application..."
 cp -v ./fap.py /home/fap/
+cp -v ./src/update_fap.sh /home/fap/
 
 echo ">>> Copying lib/..."
 mkdir -p /home/fap/lib
@@ -96,14 +115,10 @@ else
     echo ">>> Skipping templates (use -t to overwrite)"
 fi
 
-echo ">>> Creating directories..."
-mkdir -p /home/fap/logs
-mkdir -p /home/fap/pcap
-
 echo ">>> Setting permissions..."
 chmod a+x /home/fap/*.py 2>/dev/null || true
-chmod a+x /home/fap/src/*.sh
-chmod a+x /etc/rc.local
+chmod a+x /home/fap/src/*.sh 2>/dev/null || true
+[ -f /etc/rc.local ] && chmod a+x /etc/rc.local
 chown -R fap:fap /home/fap/*
 
 echo ">>> Loading firewall rules..."
