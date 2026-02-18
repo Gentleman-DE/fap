@@ -195,6 +195,7 @@ cp ./src/unbound* /home/fap/src/
 cp ./src/rc.local /etc/
 cp ./src/index.html /var/www/html/
 cp ./fap.py /home/fap
+cp ./src/update_fap.sh /home/fap/
 cp -Rv ./clean /home/fap/
 #cp ./status.py /home/fap
 cp -Rv ./lib/* /home/fap/lib/
