@@ -3,7 +3,6 @@ import sys
 import time
 import argparse
 import datetime
-import re
 import ipaddress
 import fnmatch
 from termcolor import colored
@@ -19,11 +18,11 @@ import threading
 
 VERSION = "0.9.2"
 DATUM = "16.02.2026"
-DATADIR = "/var/www/html/fap/messenger"
 TEMPLATEDIR = "/home/fap/template"
-HOMEDIR = "/home/fap/src/"
 UNBOUND_CONF = "/etc/unbound/unbound.conf.d/whitelist.conf"
 LOOPBACK_IPS = {"127.0.0.1", "0.0.0.0", "::1", "::"}
+FAPSSID = "bob"
+FAPPASSWORT = "12345678"
 
 session = None
 tshark_capture = None
@@ -249,16 +248,21 @@ def add_ip_to_ipset(ip: str):
     try:
         if is_ipv6(ip):
             ipset_name = "WL6"
+            color = "cyan"
+            ip_type = "IPv6"
         else:
             ipset_name = "WL"
+            color = "green"
+            ip_type = "IPv4"
 
         subprocess.run(
             ["sudo", "ipset", "add", ipset_name, ip],
             check=False,
             capture_output=True
         )
+        print(colored(f"Added {ip_type} address {ip} to iptables whitelist", color))
         if session:
-            session.info(f"ip added {ip} to {ipset_name}")
+            session.info(f"Added {ip_type} {ip} to firewall")
     except Exception as e:
         if session:
             session.error(f"Failed to add IP {ip}: {e}")
@@ -444,9 +448,9 @@ def manageListOfEntries(loe):
         else:
             fqdn_list.append(r)
     for ip in ip_list:
-        addIPtoFirewall(ip)
+        add_ip_to_ipset(ip)
     for ipv6 in ipv6_list:
-        addIPv6toFirewall(ipv6)
+        add_ip_to_ipset(ipv6)
     return fqdn_list
 
 
@@ -475,15 +479,8 @@ def unbound_mgmt(target_list):
     if os.path.exists(UNBOUND_CONF):
         if session:
             session.info("Unbound whitelist file exists")
-        copyfile(UNBOUND_CONF, "unbound_orig")
     else:
         copyfile("/home/fap/src/unbound_start", UNBOUND_CONF)
-
-    # Enforce default blocking at Unbound level
-    file = open(UNBOUND_CONF, "a")
-    file.write("    # Default Block Rule\n")
-    file.write("    local-zone: \".\" refuse\n\n") 
-    file.close()
 
     if type_of_target == 1:
         dir = TEMPLATEDIR + "/" + target
@@ -556,9 +553,9 @@ def insert_template_file(t):
                     if session:
                         session.error(f"Invalid CIDR range: {ip_entry}")
             elif is_ipv6(ip_entry):
-                addIPv6toFirewall(ip_entry)
+                add_ip_to_ipset(ip_entry)
             else:
-                addIPtoFirewall(ip_entry)
+                add_ip_to_ipset(ip_entry)
         else:
             insert_line = "    local-zone: " + line + " transparent\n"
             print("Adding ", insert_line, end='')
@@ -617,8 +614,7 @@ def fap_start(acl, target_list):
 def reset_ALL(t):
     if session:
         session.info(f"reset_ALL called at {t}")
-    print("Restore unbound")
-    # copyfile("unbound_orig", UNBOUND_CONF)
+
     resetUnbound()
 
     uhr = formatTime(getTime())
@@ -691,12 +687,6 @@ def getApp():
         else:
             print("Choosen list of targets is " + colored(args.multiple, "yellow"))
         return True
-
-
-def getUniqueApp():
-    if session:
-        session.info("getUniqueApp called")
-    print(args.unique)
 
 
 def getTarget():
@@ -780,12 +770,7 @@ def restartWLAN():
     if session:
         session.info("restartWLAN called")
     print("WLAN settings will be erased...")
-    os.system("/home/fap/src/hostapd_start.sh")
-    os.system("sudo hostapd -B /etc/hostapd.conf")
-    print("New WLAN Settings enabled")
-    getWlanStatus()
-    exit()
-
+    defineWLAN(f"{FAPSSID}:{FAPPASSWORT}")
 
 def defineWLAN(values: str):
     if session:
@@ -910,29 +895,6 @@ def resetUnbound():
     os.system("systemctl restart unbound")
 
 
-def getOutputDirectory():
-    if session:
-        session.info("getOutputDirectory called")
-    ts = formatTime(getTime())
-    if args.output:
-        o = args.output
-        if os.path.isdir(o):
-            if o[-1] != "/":
-                o = o + "/"
-            pcapfile = o + "non_expert_" + ts + ".pcap"
-            print(colored("Output directory set to " + o, "green"))
-            print(">> Will copy all network packets to file: " + pcapfile)
-            print(colored("Enable write permission of " + o + " for user root", "yellow"))
-            os.system("chmod o+w " + o)
-            os.system("sudo tshark -Q -i wlan0 -w " + pcapfile + "&")
-        else:
-            print(colored("Wrong output directory for pcap export. Please check parameter -o ", "red"))
-            exit()
-    else:
-        if not check_2nd_nic():
-            print(colored("No output directory given, FAP will not capture any data", "red"))
-
-
 def check_2nd_nic():
     if "dummy0" in os.listdir('/sys/class/net/'):
         return False
@@ -940,29 +902,11 @@ def check_2nd_nic():
         return True
 
 
-def addIPtoFirewall(ip):
-    ip = ip.strip()
-    string = "ipset add WL " + ip
-    print(colored("Added IP address " + ip + " to iptables whitelist", "green"))
-    if session:
-        session.info(f"Added IPv4 {ip} to firewall")
-    os.system(string)
-
-
-def addIPv6toFirewall(ip):
-    ip = ip.strip()
-    string = "ipset add WL6 " + ip
-    print(colored("Added IPv6 address " + ip + " to iptables whitelist", "cyan"))
-    if session:
-        session.info(f"Added IPv6 {ip} to firewall")
-    os.system(string)
-
 
 if __name__ == '__main__':
     init_session()
     init_validator()
     
-    start_time_for_reset = timeit.default_timer()
     t_reset = getTime()
     
     if session:
@@ -1018,9 +962,6 @@ if __name__ == '__main__':
                         print(colored("Environment ok, lets start", "green"))
                         print("Stopping webinterface")
                         os.system("systemctl stop lighttpd")
-                        output = getOutputDirectory()
-                        if output is None:
-                            output = "/var/www/html/"
                         fap_start(getControl(), getTarget())
                     else:
                         print(colored("Error. Please correct misconfiguration and start again", "red"))
